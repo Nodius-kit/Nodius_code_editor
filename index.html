@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nodius Code Editor - Playground</title>
+  <style>
+    :root {
+      --pg-bg: #181818;
+      --pg-fg: #e0e0e0;
+      --pg-accent: #007acc;
+      --pg-accent-hover: #1a8ad4;
+      --pg-surface: #252526;
+      --pg-surface-hover: #2d2d2d;
+      --pg-border: #3c3c3c;
+      --pg-muted: #888;
+      --pg-success: #4ec9b0;
+      --pg-danger: #f44747;
+      --pg-warning: #cca700;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--pg-bg); color: var(--pg-fg); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
+
+    /* ===== Top Bar ===== */
+    .pg-topbar {
+      display: flex; align-items: center; height: 40px; padding: 0 16px;
+      background: var(--pg-surface); border-bottom: 1px solid var(--pg-border);
+      gap: 16px; flex-shrink: 0;
+    }
+    .pg-logo {
+      font-weight: 700; font-size: 15px; letter-spacing: -0.3px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pg-logo-icon { color: var(--pg-accent); font-size: 18px; }
+    .pg-topbar-spacer { flex: 1; }
+    .pg-topbar-link {
+      color: var(--pg-muted); text-decoration: none; font-size: 12px;
+      transition: color 0.15s;
+    }
+    .pg-topbar-link:hover { color: var(--pg-fg); }
+
+    /* ===== Playground Tabs ===== */
+    .pg-tabs {
+      display: flex; align-items: stretch; height: 36px;
+      background: var(--pg-bg); border-bottom: 1px solid var(--pg-border);
+      flex-shrink: 0; padding: 0 12px; gap: 2px;
+    }
+    .pg-tab {
+      display: flex; align-items: center; padding: 0 16px; gap: 6px;
+      cursor: pointer; font-size: 13px; color: var(--pg-muted);
+      border-bottom: 2px solid transparent; transition: all 0.15s;
+      user-select: none; white-space: nowrap;
+    }
+    .pg-tab:hover { color: var(--pg-fg); background: var(--pg-surface-hover); }
+    .pg-tab.active { color: var(--pg-fg); border-bottom-color: var(--pg-accent); }
+    .pg-tab-icon { font-size: 14px; }
+
+    /* ===== Panels ===== */
+    .pg-body { display: flex; flex: 1; overflow: hidden; }
+    .pg-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .pg-panel.active { display: flex; }
+
+    /* ===== Editor Panel ===== */
+    .pg-editor-panel { display: flex; flex-direction: row; flex: 1; overflow: hidden; }
+    .pg-editor-container { flex: 1; overflow: hidden; position: relative; }
+    .pg-options-sidebar {
+      width: 280px; flex-shrink: 0; overflow-y: auto;
+      background: var(--pg-surface); border-left: 1px solid var(--pg-border);
+      padding: 16px; display: flex; flex-direction: column; gap: 16px;
+    }
+
+    .pg-section-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--pg-muted); margin-bottom: 8px;
+    }
+    .pg-option-group { display: flex; flex-direction: column; gap: 8px; }
+    .pg-option-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .pg-option-label { font-size: 12px; color: var(--pg-fg); }
+
+    /* Controls */
+    .pg-btn {
+      padding: 6px 14px; border-radius: 4px; border: 1px solid var(--pg-border);
+      background: var(--pg-surface-hover); color: var(--pg-fg); cursor: pointer;
+      font-size: 12px; transition: all 0.15s; font-family: inherit;
+    }
+    .pg-btn:hover { background: #3c3c3c; border-color: #555; }
+    .pg-btn-primary { background: var(--pg-accent); border-color: var(--pg-accent); color: #fff; }
+    .pg-btn-primary:hover { background: var(--pg-accent-hover); }
+    .pg-btn-sm { padding: 3px 10px; font-size: 11px; }
+    .pg-btn-danger { border-color: var(--pg-danger); color: var(--pg-danger); }
+    .pg-btn-danger:hover { background: var(--pg-danger); color: #fff; }
+
+    .pg-select {
+      padding: 4px 8px; border-radius: 4px; border: 1px solid var(--pg-border);
+      background: var(--pg-bg); color: var(--pg-fg); font-size: 12px;
+      font-family: inherit; cursor: pointer; min-width: 100px;
+    }
+    .pg-input {
+      padding: 4px 8px; border-radius: 4px; border: 1px solid var(--pg-border);
+      background: var(--pg-bg); color: var(--pg-fg); font-size: 12px;
+      font-family: inherit; width: 60px; text-align: center;
+    }
+    .pg-toggle {
+      position: relative; width: 36px; height: 20px; border-radius: 10px;
+      background: var(--pg-border); cursor: pointer; transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .pg-toggle.on { background: var(--pg-accent); }
+    .pg-toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%; background: #fff;
+      transition: transform 0.2s;
+    }
+    .pg-toggle.on::after { transform: translateX(16px); }
+
+    /* Event log */
+    .pg-event-log {
+      background: #111; border-radius: 4px; padding: 8px; font-family: monospace;
+      font-size: 11px; overflow-y: auto; max-height: 160px; min-height: 80px;
+      border: 1px solid var(--pg-border);
+    }
+    .pg-event-log-entry { padding: 1px 0; color: var(--pg-muted); }
+    .pg-event-log-entry .ev-name { color: var(--pg-accent); }
+    .pg-event-log-entry .ev-time { color: #555; }
+
+    /* ===== Collab Panel ===== */
+    .pg-collab-layout {
+      display: flex; flex: 1; overflow: hidden; flex-direction: column;
+    }
+    .pg-collab-toolbar {
+      display: flex; align-items: center; padding: 10px 16px; gap: 12px;
+      background: var(--pg-surface); border-bottom: 1px solid var(--pg-border);
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .pg-collab-status {
+      display: flex; align-items: center; gap: 6px; font-size: 12px;
+    }
+    .pg-collab-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .pg-collab-dot.connected { background: var(--pg-success); }
+    .pg-collab-dot.disconnected { background: var(--pg-danger); }
+
+    .pg-collab-editors {
+      display: flex; flex: 1; overflow: hidden;
+    }
+    .pg-collab-pane {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      position: relative;
+    }
+    .pg-collab-pane + .pg-collab-pane { border-left: 2px solid var(--pg-accent); }
+    .pg-collab-pane-header {
+      display: flex; align-items: center; height: 30px; padding: 0 12px;
+      background: var(--pg-surface); border-bottom: 1px solid var(--pg-border);
+      font-size: 12px; gap: 8px; flex-shrink: 0;
+    }
+    .pg-collab-user-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .pg-collab-user-name { font-weight: 600; }
+    .pg-collab-pane-body { flex: 1; overflow: hidden; }
+
+    .pg-collab-info {
+      display: flex; flex-direction: column; gap: 10px; padding: 16px;
+      background: var(--pg-surface); border-top: 1px solid var(--pg-border);
+      flex-shrink: 0; max-height: 200px; overflow-y: auto;
+    }
+    .pg-collab-info-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--pg-muted); }
+    .pg-collab-op-log {
+      font-family: monospace; font-size: 11px; background: #111;
+      border-radius: 4px; padding: 8px; overflow-y: auto; max-height: 120px;
+      border: 1px solid var(--pg-border);
+    }
+    .pg-collab-op-entry { padding: 1px 0; }
+    .pg-collab-op-entry .op-user { font-weight: 600; }
+    .pg-collab-op-entry .op-type { color: var(--pg-warning); }
+    .pg-collab-op-entry .op-detail { color: var(--pg-muted); }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 900px) {
+      .pg-options-sidebar { width: 240px; }
+      .pg-collab-editors { flex-direction: column; }
+      .pg-collab-pane + .pg-collab-pane { border-left: none; border-top: 2px solid var(--pg-accent); }
+    }
+
+    /* ===== App Layout ===== */
+    #app {
+      display: flex; flex-direction: column; width: 100%; height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Top Bar -->
+    <div class="pg-topbar">
+      <div class="pg-logo">
+        <span class="pg-logo-icon">&lt;/&gt;</span>
+        <span>Nodius Editor</span>
+      </div>
+      <span style="font-size:11px;color:var(--pg-muted)">Playground v0.1.0</span>
+      <div class="pg-topbar-spacer"></div>
+      <a class="pg-topbar-link" href="#" id="btn-toggle-global-theme">Toggle Theme</a>
+    </div>
+
+    <!-- Tabs -->
+    <div class="pg-tabs">
+      <div class="pg-tab active" data-tab="editor">
+        <span class="pg-tab-icon">&#9998;</span> Editor
+      </div>
+      <div class="pg-tab" data-tab="collab">
+        <span class="pg-tab-icon">&#9783;</span> Collaborative
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="pg-body">
+
+      <!-- ===== EDITOR PANEL ===== -->
+      <div class="pg-panel active" id="panel-editor">
+        <div class="pg-editor-panel">
+          <div class="pg-editor-container" id="editor-main"></div>
+          <div class="pg-options-sidebar">
+
+            <div>
+              <div class="pg-section-title">Theme</div>
+              <div class="pg-option-group">
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Theme</span>
+                  <select class="pg-select" id="opt-theme">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="pg-section-title">Display</div>
+              <div class="pg-option-group">
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Font Size</span>
+                  <input class="pg-input" type="number" id="opt-fontsize" value="14" min="8" max="32" />
+                </div>
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Tab Size</span>
+                  <input class="pg-input" type="number" id="opt-tabsize" value="2" min="1" max="8" />
+                </div>
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Line Numbers</span>
+                  <div class="pg-toggle on" id="opt-linenumbers"></div>
+                </div>
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Minimap</span>
+                  <div class="pg-toggle on" id="opt-minimap"></div>
+                </div>
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Read Only</span>
+                  <div class="pg-toggle" id="opt-readonly"></div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="pg-section-title">Language</div>
+              <div class="pg-option-group">
+                <div class="pg-option-row">
+                  <span class="pg-option-label">Language</span>
+                  <select class="pg-select" id="opt-language">
+                    <option value="typescript">TypeScript</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="plaintext">Plain Text</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="pg-section-title">Actions</div>
+              <div class="pg-option-group" style="gap: 6px;">
+                <button class="pg-btn pg-btn-primary" id="btn-get-value">Get Value (console)</button>
+                <button class="pg-btn" id="btn-set-value">Set Sample Code</button>
+                <button class="pg-btn" id="btn-select-all">Select All</button>
+                <button class="pg-btn" id="btn-undo">Undo</button>
+                <button class="pg-btn" id="btn-redo">Redo</button>
+                <button class="pg-btn pg-btn-danger" id="btn-clear">Clear</button>
+              </div>
+            </div>
+
+            <div>
+              <div class="pg-section-title">Events Log</div>
+              <div class="pg-event-log" id="event-log"></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== COLLAB PANEL ===== -->
+      <div class="pg-panel" id="panel-collab">
+        <div class="pg-collab-layout">
+
+          <div class="pg-collab-toolbar">
+            <div class="pg-collab-status">
+              <div class="pg-collab-dot disconnected" id="collab-status-dot"></div>
+              <span id="collab-status-text">Disconnected</span>
+            </div>
+            <button class="pg-btn pg-btn-primary pg-btn-sm" id="btn-collab-start">Start Session</button>
+            <button class="pg-btn pg-btn-danger pg-btn-sm" id="btn-collab-stop" disabled>Stop</button>
+            <div style="flex:1"></div>
+            <span style="font-size:11px;color:var(--pg-muted)">Simulated local transport (no server needed)</span>
+          </div>
+
+          <div class="pg-collab-editors">
+            <div class="pg-collab-pane">
+              <div class="pg-collab-pane-header">
+                <div class="pg-collab-user-dot" style="background:#4fc1ff"></div>
+                <span class="pg-collab-user-name">Alice</span>
+                <span style="color:var(--pg-muted);font-size:11px">- Local User</span>
+              </div>
+              <div class="pg-collab-pane-body" id="collab-editor-alice"></div>
+            </div>
+            <div class="pg-collab-pane">
+              <div class="pg-collab-pane-header">
+                <div class="pg-collab-user-dot" style="background:#f5a623"></div>
+                <span class="pg-collab-user-name">Bob</span>
+                <span style="color:var(--pg-muted);font-size:11px">- Remote User</span>
+              </div>
+              <div class="pg-collab-pane-body" id="collab-editor-bob"></div>
+            </div>
+          </div>
+
+          <div class="pg-collab-info">
+            <div class="pg-collab-info-title">Operation Log</div>
+            <div class="pg-collab-op-log" id="collab-op-log">
+              <div style="color:var(--pg-muted);font-style:italic">Start a session to see operations...</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

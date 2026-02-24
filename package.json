@@ -1,0 +1,70 @@
+{
+  "name": "nodius-code-editor",
+  "version": "0.1.0",
+  "description": "A lightweight, embeddable VS Code-like code editor built from scratch in TypeScript. Zero framework dependencies. Supports syntax highlighting, real-time collaboration, themes, and Web Components.",
+  "type": "module",
+  "main": "./dist/nodius-code-editor.umd.cjs",
+  "module": "./dist/nodius-code-editor.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/nodius-code-editor.js",
+      "require": "./dist/nodius-code-editor.umd.cjs"
+    },
+    "./style.css": "./dist/nodius-code-editor.css"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "editor",
+    "code-editor",
+    "typescript",
+    "javascript",
+    "syntax-highlighting",
+    "collaborative-editing",
+    "web-component",
+    "vscode",
+    "monaco-alternative",
+    "text-editor",
+    "ot",
+    "operational-transformation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "homepage": "",
+  "bugs": {
+    "url": ""
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "dependencies": {
+    "typescript": "^5.7.0"
+  },
+  "devDependencies": {
+    "vite": "^6.1.0",
+    "vitest": "^3.0.0",
+    "jsdom": "^26.0.0",
+    "vite-plugin-dts": "^4.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

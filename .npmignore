@@ -1,0 +1,8 @@
+src/
+tests/
+index.html
+vite.config.ts
+vitest.config.ts
+tsconfig.json
+.gitignore
+node_modules/
