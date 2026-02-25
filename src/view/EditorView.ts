@@ -29,6 +29,9 @@ export class EditorView {
   private suppressSelectionChange: boolean = false;
   private lastActiveLineIndex: number = -1;
 
+  /** Pending rAF id for coalescing selectionchange events */
+  private selectionChangeRAF: number | null = null;
+
   /** Per-line HTML cache: lineId → html string */
   private htmlCache: Map<string, string> = new Map();
 
@@ -129,6 +132,8 @@ export class EditorView {
       this.incrementalRender(lines, selection, ops);
     } else {
       // No ops = full refresh (setValue, undo/redo with complex changes)
+      // Re-tokenize so new lineIds have tokens before rendering
+      this.tokenCache.tokenizeSync(lines);
       this.fullRender(lines, selection);
       return; // fullRender already handles selection
     }
@@ -136,10 +141,11 @@ export class EditorView {
     // Restore selection
     this.selectionDOM.restore(selection);
 
-    // Schedule async tokenization
+    // Schedule async tokenization (viewport-aware for large files)
+    const visibleRange = this.getVisibleLineRange();
     this.tokenCache.scheduleTokenization(lines, (changedIndices) => {
       this.applyDeferredTokenUpdate(changedIndices);
-    });
+    }, visibleRange);
 
     Promise.resolve().then(() => { this.suppressSelectionChange = false; });
   }
@@ -170,9 +176,10 @@ export class EditorView {
     this.applyActiveLineHighlight(currentLine);
     this.gutterComponent.update(lines.length, currentLine);
 
+    const visibleRange = this.getVisibleLineRange();
     this.tokenCache.scheduleTokenization(lines, (changedIndices) => {
       this.applyDeferredTokenUpdate(changedIndices);
-    });
+    }, visibleRange);
 
     Promise.resolve().then(() => { this.suppressSelectionChange = false; });
   }
@@ -198,6 +205,7 @@ export class EditorView {
 
   destroy(): void {
     this.tokenCache.cancelPending();
+    if (this.selectionChangeRAF !== null) cancelAnimationFrame(this.selectionChangeRAF);
     document.removeEventListener('selectionchange', this.boundSelectionChange);
     this.contentEl.removeEventListener('scroll', this.boundContentScroll);
     this.inputHandler.detach();
@@ -221,10 +229,11 @@ export class EditorView {
     this.gutterComponent.update(lines.length, currentLine);
     this.selectionDOM.restore(selection);
 
-    // Schedule async tokenization for subsequent updates
+    // Schedule async tokenization for subsequent updates (viewport-aware)
+    const visibleRange = this.getVisibleLineRange();
     this.tokenCache.scheduleTokenization(lines, (changedIndices) => {
       this.applyDeferredTokenUpdate(changedIndices);
-    });
+    }, visibleRange);
 
     Promise.resolve().then(() => { this.suppressSelectionChange = false; });
   }
@@ -267,6 +276,7 @@ export class EditorView {
       for (const idx of affected) {
         if (idx >= 0 && idx < lines.length) {
           const line = lines[idx];
+          this.tokenCache.tokenizeLineSync(line.id, line.text);
           const html = this.renderLineHtml(line.id, line.text);
           this.reconciler.updateLineHtml(line.id, html);
         }
@@ -292,6 +302,7 @@ export class EditorView {
       for (const idx of affected) {
         if (idx >= 0 && idx < lines.length) {
           const line = lines[idx];
+          this.tokenCache.tokenizeLineSync(line.id, line.text);
           const html = this.renderLineHtml(line.id, line.text);
           this.reconciler.updateLineHtml(line.id, html);
         }
@@ -419,16 +430,23 @@ export class EditorView {
   private onSelectionChange(): void {
     if (this.suppressSelectionChange) return;
     if (!this.selectionChangeHandler) return;
+    if (this.selectionChangeRAF !== null) return; // already scheduled
 
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const anchorNode = sel.anchorNode;
-    if (!anchorNode || !this.contentEl.contains(anchorNode)) return;
+    this.selectionChangeRAF = requestAnimationFrame(() => {
+      this.selectionChangeRAF = null;
+      if (this.suppressSelectionChange) return;
+      if (!this.selectionChangeHandler) return;
 
-    const captured = this.selectionDOM.capture();
-    if (captured) {
-      this.selectionChangeHandler(captured);
-    }
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const anchorNode = sel.anchorNode;
+      if (!anchorNode || !this.contentEl.contains(anchorNode)) return;
+
+      const captured = this.selectionDOM.capture();
+      if (captured) {
+        this.selectionChangeHandler(captured);
+      }
+    });
   }
 }
 

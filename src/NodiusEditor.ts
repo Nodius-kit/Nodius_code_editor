@@ -186,8 +186,11 @@ export class NodiusEditor {
     // Apply font size
     this.view.getRootElement().style.fontSize = `${this.options.fontSize}px`;
 
-    // Set parser for syntax highlighting
-    const parser = this.languageRegistry.getParserById(languageId);
+    // Set parser for syntax highlighting (with fallback for unknown languages)
+    let parser = this.languageRegistry.getParserById(languageId);
+    if (!parser && languageId !== 'plaintext') {
+      parser = this.languageRegistry.getParserById('typescript');
+    }
     this.view.setParser(parser ?? null);
 
     // Register commands
@@ -295,6 +298,10 @@ export class NodiusEditor {
       language: languageId,
     });
     const parser = this.languageRegistry.getParserById(languageId);
+    let parser = this.languageRegistry.getParserById(languageId);
+    if (!parser && languageId !== 'plaintext') {
+      parser = this.languageRegistry.getParserById('typescript');
+    }
     this.view?.setParser(parser ?? null);
     this.statusBar?.updateLanguage(languageId);
     this.renderView();
