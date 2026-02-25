@@ -216,13 +216,37 @@ export class TokenCache {
     });
   }
 
-  /** Index tokens into a Map<lineNumber, EditorToken[]>. */
+  /**
+   * Index tokens into a Map<lineNumber, EditorToken[]>.
+   *
+   * Tokens that span multiple lines (typically whitespace containing `\n`)
+   * are split at newline boundaries so each per-line array only contains
+   * text that belongs to that line. Without this, concatTokenText(tokens)
+   * would include `\n` characters that aren't in line.text, causing the
+   * staleness check in renderLineHtml to always fail.
+   */
   private indexTokensByLine(tokens: EditorToken[]): Map<number, EditorToken[]> {
     const byLine: Map<number, EditorToken[]> = new Map();
     for (const token of tokens) {
-      let arr = byLine.get(token.line);
-      if (!arr) { arr = []; byLine.set(token.line, arr); }
-      arr.push(token);
+      if (token.text.indexOf('\n') === -1) {
+        // Common fast path: token doesn't cross lines
+        let arr = byLine.get(token.line);
+        if (!arr) { arr = []; byLine.set(token.line, arr); }
+        arr.push(token);
+      } else {
+        // Token spans lines (whitespace, multi-line strings/comments)
+        // Split at \n boundaries, assigning each part to its line
+        const parts = token.text.split('\n');
+        let line = token.line;
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].length > 0) {
+            let arr = byLine.get(line);
+            if (!arr) { arr = []; byLine.set(line, arr); }
+            arr.push({ ...token, text: parts[i], line });
+          }
+          if (i < parts.length - 1) line++;
+        }
+      }
     }
     return byLine;
   }

@@ -28,6 +28,7 @@ export class EditorView {
   private boundContentScroll: () => void;
   private suppressSelectionChange: boolean = false;
   private lastActiveLineIndex: number = -1;
+  private lastActiveLineEl: HTMLElement | null = null;
 
   /** Pending rAF id for coalescing selectionchange events */
   private selectionChangeRAF: number | null = null;
@@ -414,15 +415,17 @@ export class EditorView {
   }
 
   private applyActiveLineHighlight(lineIndex: number): void {
-    if (this.lastActiveLineIndex >= 0) {
-      const children = this.contentEl.children;
-      if (this.lastActiveLineIndex < children.length) {
-        children[this.lastActiveLineIndex].classList.remove('nc-line-highlight');
-      }
+    // Remove from previously tracked element (by reference — survives reconcile reorders)
+    if (this.lastActiveLineEl) {
+      this.lastActiveLineEl.classList.remove('nc-line-highlight');
+      this.lastActiveLineEl = null;
     }
+
     const children = this.contentEl.children;
     if (lineIndex >= 0 && lineIndex < children.length) {
-      children[lineIndex].classList.add('nc-line-highlight');
+      const el = children[lineIndex] as HTMLElement;
+      el.classList.add('nc-line-highlight');
+      this.lastActiveLineEl = el;
     }
     this.lastActiveLineIndex = lineIndex;
   }
@@ -444,6 +447,9 @@ export class EditorView {
 
       const captured = this.selectionDOM.capture();
       if (captured) {
+        // Update active line highlight on click/arrow key navigation
+        const currentLine = captured.ranges[captured.primary]?.anchor.line ?? 0;
+        this.applyActiveLineHighlight(currentLine);
         this.selectionChangeHandler(captured);
       }
     });

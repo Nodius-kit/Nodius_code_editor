@@ -297,7 +297,6 @@ export class NodiusEditor {
       ...this.state.snapshot,
       language: languageId,
     });
-    const parser = this.languageRegistry.getParserById(languageId);
     let parser = this.languageRegistry.getParserById(languageId);
     if (!parser && languageId !== 'plaintext') {
       parser = this.languageRegistry.getParserById('typescript');
