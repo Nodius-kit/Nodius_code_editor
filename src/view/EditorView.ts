@@ -192,6 +192,10 @@ export class EditorView {
   getRootElement(): HTMLElement { return this.rootEl; }
   getContentElement(): HTMLElement { return this.contentEl; }
 
+  setKeyInterceptor(fn: ((e: KeyboardEvent) => boolean) | null): void {
+    this.inputHandler.setKeyInterceptor(fn);
+  }
+
   focus(): void { this.contentEl.focus(); }
 
   getVisibleLineRange(): { start: number; end: number } {

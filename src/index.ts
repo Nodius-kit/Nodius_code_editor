@@ -98,6 +98,17 @@ export { CollaborationClient as CollaborationManager } from './collaboration/Col
 /** @deprecated No longer needed. Batching is handled by CollaborationClient's state machine. */
 export { BatchedTransport } from './collaboration/BatchedTransport';
 
+// Completion
+export type {
+  CompletionItem,
+  CompletionItemKind,
+  CompletionContext,
+  CompletionList,
+  CompletionProvider,
+  CompletionResult,
+} from './core/completion/types';
+export { CompletionEngine } from './core/completion/CompletionEngine';
+
 // Themes
 export { ThemeManager } from './themes/ThemeManager';
 export { darkTheme } from './themes/dark';

@@ -15,6 +15,7 @@ export class InputHandler {
   private keymapRegistry: KeymapRegistry;
   private handler: InputActionHandler | null = null;
   private composing: boolean = false;
+  private keyInterceptor: ((e: KeyboardEvent) => boolean) | null = null;
 
   // Bound handlers for cleanup
   private boundKeyDown: (e: KeyboardEvent) => void;
@@ -65,8 +66,13 @@ export class InputHandler {
     if (this.handler) this.handler(action);
   }
 
+  setKeyInterceptor(fn: ((e: KeyboardEvent) => boolean) | null): void {
+    this.keyInterceptor = fn;
+  }
+
   private onKeyDown(e: KeyboardEvent): void {
     if (this.composing) return;
+    if (this.keyInterceptor && this.keyInterceptor(e)) return;
     const commandId = this.keymapRegistry.handleKeyDown(e);
     if (commandId) {
       e.preventDefault();

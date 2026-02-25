@@ -149,6 +149,7 @@ export interface EditorOptions {
   sidebar?: boolean;      // Show sidebar (default: true)
   statusBar?: boolean;    // Show status bar (default: true)
   findReplace?: boolean;  // Enable find/replace (default: true)
+  autocomplete?: boolean; // Enable autocomplete (default: true)
 }
 
 // ========== Collaboration Types ==========

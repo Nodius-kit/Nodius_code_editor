@@ -19,6 +19,7 @@ A lightweight, embeddable VS Code-like code editor built from scratch in TypeScr
 - **VS Code keybindings** -- undo, redo, copy, cut, paste, find/replace, indent, comment toggle, and more
 - **Minimap** -- code overview panel with viewport highlighting
 - **Find and Replace** -- regex, case-sensitive, and whole-word search with replace/replace-all
+- **Autocomplete** -- intelligent code completion with documentation panel (TypeScript/JavaScript built-in)
 - **Auto-closing brackets** -- automatic pairing for `{}`, `()`, `[]`, quotes, and backticks
 - **Auto-indentation** -- smart indent on Enter after opening brackets
 - **Line numbers** -- togglable gutter with line numbers
@@ -88,6 +89,48 @@ const editor = new NodiusEditor(container, {
 });
 ```
 
+### Dynamic editors
+
+Create editors programmatically from CSS selectors or DOM references, and destroy them when no longer needed:
+
+```typescript
+import { NodiusEditor } from 'nodius-code-editor';
+import 'nodius-code-editor/style.css';
+
+// Create from a CSS selector
+const editor1 = NodiusEditor.create('#editor-1', {
+  value: 'const x = 1;',
+  language: 'typescript',
+});
+
+// Create from a DOM element
+const div = document.createElement('div');
+document.body.appendChild(div);
+const editor2 = NodiusEditor.create(div, {
+  value: 'console.log("hello");',
+  theme: 'light',
+});
+
+// Destroy when done
+editor1.destroy();
+editor2.destroy();
+div.remove();
+```
+
+#### Multiple editors on the same page
+
+```typescript
+const containers = document.querySelectorAll('.code-editor');
+const editors: NodiusEditor[] = [];
+
+containers.forEach((el) => {
+  editors.push(NodiusEditor.create(el as HTMLElement, { theme: 'dark' }));
+});
+
+// Clean up all editors
+editors.forEach((e) => e.destroy());
+```
+
 ### Reading and writing content
 
 ```typescript
@@ -125,6 +168,7 @@ All options are optional. Pass them as the second argument to `new NodiusEditor(
 | `sidebar` | `boolean` | `true` | Show the sidebar |
 | `statusBar` | `boolean` | `true` | Show the status bar |
 | `findReplace` | `boolean` | `true` | Enable the find/replace panel |
+| `autocomplete` | `boolean` | `true` | Enable intelligent autocompletion |
 
 ```typescript
 const editor = new NodiusEditor(container, {
@@ -142,6 +186,7 @@ const editor = new NodiusEditor(container, {
   sidebar: true,
   statusBar: true,
   findReplace: true,
+  autocomplete: true,
 });
 ```
 
@@ -437,6 +482,62 @@ import { detectByExtension, detectByContent } from 'nodius-code-editor';
 
 detectByExtension('app.tsx');  // 'typescript'
 detectByContent('#!/usr/bin/env node'); // 'javascript'
+```
+
+---
+
+## Autocomplete
+
+Nodius provides intelligent autocompletion powered by the TypeScript Language Service. Completions appear automatically as you type and include a documentation panel showing type signatures and descriptions.
+
+### Behavior
+
+- **Always-on**: completions appear automatically when typing identifier characters or after trigger characters (`.`)
+- **Navigation**: use Arrow Up/Down to navigate, Enter or Tab to accept, Escape to dismiss
+- **Documentation panel**: shows the type signature and description of the selected completion item
+- **Smart dismiss**: the popup dismisses when clicking elsewhere, pressing Escape, or typing whitespace/punctuation
+
+### Disabling autocomplete
+
+```typescript
+const editor = new NodiusEditor(container, {
+  autocomplete: false,
+});
+```
+
+### Custom completions
+
+Register static completion items:
+
+```typescript
+const unregister = editor.registerCompletions([
+  { label: 'myFunction', kind: 'function', detail: '(): void', documentation: 'Does something useful' },
+  { label: 'myVariable', kind: 'variable', detail: 'string', documentation: 'A custom variable' },
+]);
+
+// Later, to remove them:
+unregister();
+```
+
+### Custom completion provider
+
+For dynamic completions, register a provider:
+
+```typescript
+const unregister = editor.registerCompletionProvider({
+  triggerCharacters: ['/'],
+  provideCompletions(context) {
+    if (context.triggerCharacter === '/') {
+      return {
+        items: [
+          { label: 'api/users', kind: 'value', detail: 'GET endpoint' },
+          { label: 'api/posts', kind: 'value', detail: 'GET endpoint' },
+        ],
+      };
+    }
+    return { items: [] };
+  },
+});
 ```
 
 ---
@@ -742,12 +843,14 @@ src/
     commands/           Command registry
     keymap/             Key binding registry
     events/             Typed event bus
+    completion/         CompletionEngine, types
 
   language/
     types.ts            LanguageParser, token types
     LanguageRegistry.ts Parser registry and language detection
     detection.ts        Auto-detection by extension and content
     typescript/         Built-in TypeScript/JavaScript tokenizer
+      TypeScriptCompletionProvider  TS Language Service completions
 
   collaboration/
     types.ts            Protocol message types
@@ -775,6 +878,7 @@ src/
     InputHandler.ts     Keyboard and input event handling
     SelectionDOM.ts     DOM selection management
     FindReplace.ts      Find and replace panel
+    AutocompleteWidget.ts Autocomplete popup and doc panel
 
   styles/
     editor.css          Base editor styles

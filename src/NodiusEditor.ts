@@ -32,7 +32,11 @@ import { Minimap } from './view/Minimap';
 import { Sidebar } from './view/Sidebar';
 import { FindReplace } from './view/FindReplace';
 import type { SearchOptions } from './view/FindReplace';
+import { AutocompleteWidget } from './view/AutocompleteWidget';
 import type { InputAction } from './view/InputHandler';
+import { CompletionEngine } from './core/completion/CompletionEngine';
+import { TypeScriptCompletionProvider } from './language/typescript/TypeScriptCompletionProvider';
+import type { CompletionItem, CompletionProvider, CompletionResult, CompletionContext } from './core/completion/types';
 import './styles/editor.css';
 
 export class NodiusEditor {
@@ -59,6 +63,17 @@ export class NodiusEditor {
   private findMatches: Array<{ line: number; column: number; length: number }> = [];
   private findMatchIndex: number = -1;
 
+  // Autocomplete state
+  private completionEngine: CompletionEngine;
+  private autocompleteWidget: AutocompleteWidget | null = null;
+  private tsCompletionProvider: TypeScriptCompletionProvider | null = null;
+  private autocompleteActive: boolean = false;
+  private lastCompletionResult: CompletionResult | null = null;
+  private lastCompletionContext: CompletionContext | null = null;
+  private autocompleteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private docResolveTimer: ReturnType<typeof setTimeout> | null = null;
+  private inputActionPending: boolean = false;
+
   constructor(container: HTMLElement, options: EditorOptions = {}) {
     this.container = container;
     this.options = {
@@ -76,6 +91,7 @@ export class NodiusEditor {
       sidebar: options.sidebar ?? true,
       statusBar: options.statusBar ?? true,
       findReplace: options.findReplace ?? true,
+      autocomplete: options.autocomplete ?? true,
     };
     this.readOnly = this.options.readOnly;
 
@@ -201,6 +217,68 @@ export class NodiusEditor {
       this.wireFindReplace();
     }
 
+    // Autocomplete setup
+    this.completionEngine = new CompletionEngine();
+    if (this.options.autocomplete) {
+      this.autocompleteWidget = new AutocompleteWidget();
+      centerEl.appendChild(this.autocompleteWidget.getElement());
+
+      this.autocompleteWidget.onAccept = (item: CompletionItem) => {
+        this.acceptCompletion(item);
+      };
+      this.autocompleteWidget.onDismiss = () => {
+        this.dismissAutocomplete();
+      };
+      this.autocompleteWidget.onSelectionChange = () => {
+        this.scheduleDocResolve();
+      };
+
+      // Create TS completion provider
+      this.tsCompletionProvider = new TypeScriptCompletionProvider();
+      this.completionEngine.registerProvider(this.tsCompletionProvider);
+
+      // Install key interceptor for autocomplete navigation
+      this.view!.setKeyInterceptor((e: KeyboardEvent) => {
+        if (!this.autocompleteActive || !this.autocompleteWidget?.isVisible()) return false;
+        switch (e.key) {
+          case 'ArrowDown':
+            e.preventDefault();
+            this.autocompleteWidget!.selectNext();
+            this.scheduleDocResolve();
+            return true;
+          case 'ArrowUp':
+            e.preventDefault();
+            this.autocompleteWidget!.selectPrev();
+            this.scheduleDocResolve();
+            return true;
+          case 'Enter':
+          case 'Tab': {
+            e.preventDefault();
+            const item = this.autocompleteWidget!.getSelectedItem();
+            if (item) this.acceptCompletion(item);
+            return true;
+          }
+          case 'Escape':
+            e.preventDefault();
+            this.dismissAutocomplete();
+            return true;
+          default:
+            return false;
+        }
+      });
+
+      // Dismiss autocomplete when editor loses focus
+      this.view!.getContentElement().addEventListener('blur', () => {
+        // Small delay: allow clicks on the widget itself to fire first
+        setTimeout(() => {
+          if (!this.view?.getContentElement().contains(document.activeElement) &&
+              !this.autocompleteWidget?.getElement().contains(document.activeElement)) {
+            this.dismissAutocomplete();
+          }
+        }, 150);
+      });
+    }
+
     // Hide gutter if lineNumbers is disabled
     if (!this.options.lineNumbers) {
       this.view.getRootElement().querySelector('.nc-gutter')?.setAttribute('style', 'display:none');
@@ -221,6 +299,12 @@ export class NodiusEditor {
         ...this.state.snapshot,
         selection,
       });
+      // Dismiss autocomplete on click/arrow navigation — but NOT when
+      // the selectionchange was caused by an input action (typing), since
+      // the autocomplete handler has already decided whether to show/dismiss.
+      if (!this.inputActionPending) {
+        this.dismissAutocomplete();
+      }
       // Update status bar without re-rendering content
       const primary = selection.ranges[selection.primary];
       if (primary) {
@@ -250,6 +334,23 @@ export class NodiusEditor {
   }
 
   // ========== Public API ==========
+
+  /**
+   * Factory method — accepts a CSS selector string or an HTMLElement.
+   * Returns a new NodiusEditor instance mounted in the resolved container.
+   */
+  static create(
+    container: HTMLElement | string,
+    options?: EditorOptions
+  ): NodiusEditor {
+    const el = typeof container === 'string'
+      ? document.querySelector<HTMLElement>(container)
+      : container;
+    if (!el) {
+      throw new Error(`NodiusEditor.create: container not found for selector "${container}"`);
+    }
+    return new NodiusEditor(el, options);
+  }
 
   getValue(): string {
     return getText(this.state.doc);
@@ -365,6 +466,16 @@ export class NodiusEditor {
     this.applyTransaction(transaction);
   }
 
+  // ========== Autocomplete Public API ==========
+
+  registerCompletions(items: CompletionItem[]): () => void {
+    return this.completionEngine.registerSimpleCompletions(items);
+  }
+
+  registerCompletionProvider(provider: CompletionProvider): () => void {
+    return this.completionEngine.registerProvider(provider);
+  }
+
   // ========== UI Component Visibility ==========
 
   showTabBar(visible: boolean): void {
@@ -428,6 +539,9 @@ export class NodiusEditor {
   }
 
   destroy(): void {
+    this.dismissAutocomplete();
+    this.autocompleteWidget?.destroy();
+    this.tsCompletionProvider?.dispose();
     this.view?.destroy();
     this.wrapperEl.remove();
     this.eventBus.emit('destroy', {});
@@ -656,6 +770,13 @@ export class NodiusEditor {
   private handleInputAction(action: InputAction): void {
     if (this.readOnly && action.type !== 'command') return;
 
+    // Mark that an input action is in progress — prevents the selectionchange
+    // rAF handler from dismissing autocomplete that was just triggered.
+    this.inputActionPending = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { this.inputActionPending = false; });
+    });
+
     // CRITICAL: sync the DOM selection to model before processing ANY input.
     // Without this, the model's cursor position is stale and text gets
     // inserted at the wrong location.
@@ -678,6 +799,232 @@ export class NodiusEditor {
         this.insertNewLine();
         break;
     }
+
+    // Autocomplete lifecycle
+    if (this.options.autocomplete) {
+      this.handleAutocompleteAfterAction(action);
+    }
+  }
+
+  // ========== Autocomplete Internals ==========
+
+  private handleAutocompleteAfterAction(action: InputAction): void {
+    switch (action.type) {
+      case 'insertText': {
+        const text = action.text;
+        if (text.length === 1) {
+          const triggerChars = this.completionEngine.getTriggerCharacters();
+          if (triggerChars.has(text)) {
+            // Trigger character: show immediately
+            this.scheduleAutocomplete(0, 'triggerCharacter', text);
+          } else if (/[\w$]/.test(text)) {
+            // Identifier character: debounce
+            this.scheduleAutocomplete(80, 'automatic');
+          } else if (/[\s;)}\]]/.test(text)) {
+            // Dismiss on space, semicolons, closing brackets
+            this.dismissAutocomplete();
+          }
+        } else {
+          // Multi-char paste: dismiss
+          this.dismissAutocomplete();
+        }
+        break;
+      }
+      case 'deleteBackward':
+      case 'deleteForward': {
+        // Always re-trigger: check prefix and re-filter or dismiss
+        const pos = this.state.selection.ranges[this.state.selection.primary]?.focus;
+        if (pos) {
+          const lineText = this.state.doc.lines[pos.line]?.text ?? '';
+          const prefix = this.completionEngine.getWordPrefix(lineText, pos.column);
+          if (prefix.length > 0) {
+            this.scheduleAutocomplete(50, 'automatic');
+          } else {
+            this.dismissAutocomplete();
+          }
+        }
+        break;
+      }
+      case 'newLine':
+        this.dismissAutocomplete();
+        break;
+      case 'command':
+        this.dismissAutocomplete();
+        break;
+    }
+  }
+
+  private scheduleAutocomplete(delay: number, triggerKind: 'invoke' | 'triggerCharacter' | 'automatic', triggerChar?: string): void {
+    if (this.autocompleteDebounceTimer !== null) {
+      clearTimeout(this.autocompleteDebounceTimer);
+    }
+    if (delay === 0) {
+      this.triggerAutocomplete(triggerKind, triggerChar);
+    } else {
+      this.autocompleteDebounceTimer = setTimeout(() => {
+        this.autocompleteDebounceTimer = null;
+        this.triggerAutocomplete(triggerKind, triggerChar);
+      }, delay);
+    }
+  }
+
+  private triggerAutocomplete(triggerKind: 'invoke' | 'triggerCharacter' | 'automatic', triggerChar?: string): void {
+    if (!this.autocompleteWidget) return;
+
+    const pos = this.state.selection.ranges[this.state.selection.primary]?.focus;
+    if (!pos) return;
+
+    const lineText = this.state.doc.lines[pos.line]?.text ?? '';
+    const wordPrefix = this.completionEngine.getWordPrefix(lineText, pos.column);
+
+    const context: CompletionContext = {
+      documentText: this.state.doc.lines.map(l => l.text).join('\n'),
+      position: pos,
+      lineText,
+      wordPrefix,
+      triggerKind,
+      triggerCharacter: triggerChar,
+      language: this.state.language,
+      fileName: this.state.fileName,
+    };
+
+    this.lastCompletionContext = context;
+
+    this.completionEngine.getCompletions(context).then((result) => {
+      // Guard: context may have changed since we started
+      if (this.lastCompletionContext !== context) return;
+
+      this.lastCompletionResult = result;
+
+      if (result.items.length === 0) {
+        this.dismissAutocomplete();
+        return;
+      }
+
+      // If the only remaining item matches the prefix exactly, dismiss
+      // (user has finished typing the word)
+      if (
+        triggerKind === 'automatic' &&
+        result.items.length === 1 &&
+        wordPrefix === (result.items[0].insertText ?? result.items[0].label)
+      ) {
+        this.dismissAutocomplete();
+        return;
+      }
+
+      this.autocompleteActive = true;
+      const anchor = this.computeAutocompleteAnchor(pos.line, result.replaceStart);
+      this.autocompleteWidget!.show(result.items, anchor);
+      this.scheduleDocResolve();
+    });
+  }
+
+  private computeAutocompleteAnchor(line: number, column: number): { top: number; left: number } {
+    const contentEl = this.view?.getContentElement();
+    if (!contentEl) return { top: 0, left: 0 };
+
+    const lineEl = contentEl.children[line] as HTMLElement | undefined;
+    if (!lineEl) return { top: 0, left: 0 };
+
+    const lineRect = lineEl.getBoundingClientRect();
+    const contentRect = contentEl.getBoundingClientRect();
+    const top = lineRect.bottom - contentRect.top + contentEl.scrollTop;
+
+    // Measure text width up to column (monospace)
+    const lineText = this.state.doc.lines[line]?.text ?? '';
+    const measure = document.createElement('span');
+    measure.style.cssText = 'visibility:hidden;position:absolute;white-space:pre;font:inherit';
+    measure.textContent = lineText.substring(0, column);
+    lineEl.appendChild(measure);
+    const left = measure.offsetWidth;
+    measure.remove();
+
+    return { top, left };
+  }
+
+  private acceptCompletion(item: CompletionItem): void {
+    if (!this.lastCompletionResult) return;
+
+    const pos = this.state.selection.ranges[this.state.selection.primary]?.focus;
+    if (!pos) return;
+
+    const result = this.lastCompletionResult;
+    const text = item.insertText ?? item.label;
+    const ops: Operation[] = [];
+
+    // Delete the current prefix
+    const prefixLen = result.replaceEnd - result.replaceStart;
+    if (prefixLen > 0) {
+      ops.push({
+        type: 'deleteText',
+        line: pos.line,
+        column: result.replaceStart,
+        length: prefixLen,
+        origin: 'command' as OperationOrigin,
+      });
+    }
+
+    // Insert the completion text
+    ops.push({
+      type: 'insertText',
+      line: pos.line,
+      column: result.replaceStart,
+      text,
+      origin: 'command' as OperationOrigin,
+    });
+
+    const newCol = result.replaceStart + text.length;
+    const newSelection = createSelection([
+      createCollapsedRange(createPosition(pos.line, newCol)),
+    ]);
+
+    this.applyTransaction({ ops, selection: newSelection, origin: 'command' });
+    this.dismissAutocomplete();
+  }
+
+  private dismissAutocomplete(): void {
+    if (this.autocompleteDebounceTimer !== null) {
+      clearTimeout(this.autocompleteDebounceTimer);
+      this.autocompleteDebounceTimer = null;
+    }
+    if (this.docResolveTimer !== null) {
+      clearTimeout(this.docResolveTimer);
+      this.docResolveTimer = null;
+    }
+    this.autocompleteActive = false;
+    this.lastCompletionResult = null;
+    this.lastCompletionContext = null;
+    this.autocompleteWidget?.hide();
+  }
+
+  private scheduleDocResolve(): void {
+    if (this.docResolveTimer !== null) {
+      clearTimeout(this.docResolveTimer);
+    }
+    this.docResolveTimer = setTimeout(() => {
+      this.docResolveTimer = null;
+      const item = this.autocompleteWidget?.getSelectedItem();
+      if (!item || !this.lastCompletionContext) return;
+
+      // If already resolved, just show it
+      if (item.detail || item.documentation) {
+        this.autocompleteWidget?.updateDocs(item);
+        return;
+      }
+
+      // Resolve via the TS completion provider
+      if (this.tsCompletionProvider) {
+        const ctx = this.lastCompletionContext;
+        Promise.resolve(this.tsCompletionProvider.resolveItem(item, ctx)).then((resolved) => {
+          // Guard: widget might have been dismissed
+          if (!this.autocompleteActive) return;
+          const current = this.autocompleteWidget?.getSelectedItem();
+          if (current && current.label === item.label) {
+            this.autocompleteWidget?.updateDocs(resolved);
+          }
+        });
+      }
+    }, 100);
   }
 
   private insertText(text: string): void {
