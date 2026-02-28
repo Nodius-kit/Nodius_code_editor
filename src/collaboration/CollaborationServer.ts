@@ -1,6 +1,7 @@
 import type { Operation, Position } from '../core/types';
 import type { ClientMessage, ServerMessage } from './types';
 import { transformOps } from './OTEngine';
+import { encodeOperations, decodeInstructions } from './InstructionCodec';
 
 /**
  * Represents a connected client on the server side.
@@ -68,7 +69,7 @@ export class CollaborationServer {
   receiveFromClient(clientId: string, message: ClientMessage): void {
     switch (message.type) {
       case 'operation':
-        this.handleOperation(clientId, message.revision, message.ops);
+        this.handleOperation(clientId, message.revision, decodeInstructions(message.instructions));
         break;
       case 'cursor':
         this.handleCursor(clientId, message.position, message.color);
@@ -108,13 +109,14 @@ export class CollaborationServer {
     }
 
     // Broadcast transformed ops to all OTHER clients
+    const instructions = encodeOperations(ops);
     for (const [id, otherClient] of this.clients) {
       if (id !== clientId) {
         otherClient.send({
           type: 'operation',
           revision: this.revision,
           userId: clientId,
-          ops,
+          instructions,
         });
       }
     }

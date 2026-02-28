@@ -90,6 +90,12 @@ export type {
   CollaborationClientOptions,
 } from './collaboration/types';
 export { transform, transformOps } from './collaboration/OTEngine';
+export {
+  encodeOperation,
+  encodeOperations,
+  decodeInstruction,
+  decodeInstructions,
+} from './collaboration/InstructionCodec';
 export { CursorSync } from './collaboration/CursorSync';
 export { CollaborationServer } from './collaboration/CollaborationServer';
 export { CollaborationClient } from './collaboration/CollaborationClient';

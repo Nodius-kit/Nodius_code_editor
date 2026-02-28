@@ -12,6 +12,13 @@ import type { Operation, OperationOrigin } from '../core/types';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Temporary collector for extra operations produced during pairwise transform.
+ * Used when a delete straddles a split point and must be split into two deletes.
+ * Collected by transformOps and appended to the A-side result.
+ */
+let _straddleAfterOps: Operation[] = [];
+
 function noop(origin: OperationOrigin): Operation {
   // A no-op is represented as replacing line 0 with its own text.
   // Since we don't know the text, we use an insertText with empty string,
@@ -63,21 +70,28 @@ function transformDeleteDelete(
     return [aPrime, b];
   }
 
-  // Overlapping deletes
+  // Overlapping deletes: each side's transform removes only the portion
+  // that the OTHER side did NOT already delete.
   const overlapStart = Math.max(a.column, b.column);
   const overlapEnd = Math.min(aEnd, bEnd);
   const overlapLen = overlapEnd - overlapStart;
 
-  const aPrime: Operation = {
-    ...a,
-    column: Math.min(a.column, b.column),
-    length: a.length - overlapLen,
-  };
-  const bPrime: Operation = {
-    ...b,
-    column: Math.min(a.column, b.column),
-    length: b.length - overlapLen,
-  };
+  // A' deletes only its non-overlapping portion.
+  // After B is applied, A's portion before the overlap stays at its original column,
+  // but text deleted by B before A's start shifts A's column left.
+  const aNewLen = a.length - overlapLen;
+  const aNewCol = a.column < b.column ? a.column : a.column - (b.length - overlapLen);
+
+  // B' deletes only its non-overlapping portion.
+  const bNewLen = b.length - overlapLen;
+  const bNewCol = b.column < a.column ? b.column : b.column - (a.length - overlapLen);
+
+  const aPrime: Operation = aNewLen === 0
+    ? noop(a.origin)
+    : { ...a, column: aNewCol, length: aNewLen };
+  const bPrime: Operation = bNewLen === 0
+    ? noop(b.origin)
+    : { ...b, column: bNewCol, length: bNewLen };
 
   return [aPrime, bPrime];
 }
@@ -296,18 +310,26 @@ function transformDeleteTextSplitLine(
       splitOp,
     ];
   }
-  // Delete straddles the split point: split into two deletes on each line
-  // For simplicity, truncate the delete to before the split
+  // Delete straddles the split point: truncate to the portion before the split.
+  // The portion after the split (on the new line at column 0) is handled by
+  // emitting a second delete via straddleAfterSplit which callers can collect.
   const lenBefore = splitOp.column - delOp.column;
   const lenAfter = delOp.length - lenBefore;
-  // A' becomes a delete of just the portion before the split
-  // The portion after the split is on the new line, but we can only
-  // return one operation per side. We'll keep the delete truncated.
   const delPrime: Operation = { ...delOp, length: lenBefore };
   const splitPrime: Operation = { ...splitOp, column: splitOp.column - lenBefore };
-  // Note: the part after the split (lenAfter chars at col 0 of new line) is lost.
-  // A more complete OT system would emit multiple ops, but we keep it simple.
-  void lenAfter;
+
+  // Store the second delete that covers the portion after the split.
+  // It lives on the next line at column 0.
+  if (lenAfter > 0) {
+    _straddleAfterOps.push({
+      type: 'deleteText',
+      line: delOp.line + 1,
+      column: 0,
+      length: lenAfter,
+      origin: delOp.origin,
+    });
+  }
+
   return [delPrime, splitPrime];
 }
 
@@ -654,8 +676,11 @@ export function transformOps(
   opsA: readonly Operation[],
   opsB: readonly Operation[],
 ): [Operation[], Operation[]] {
-  let transformedA = opsA.slice();
-  let transformedB = opsB.slice();
+  const transformedA = opsA.slice();
+  const transformedB = opsB.slice();
+
+  // Clear any stale straddle ops from a previous call
+  _straddleAfterOps = [];
 
   for (let i = 0; i < transformedA.length; i++) {
     for (let j = 0; j < transformedB.length; j++) {
@@ -663,6 +688,12 @@ export function transformOps(
       transformedA[i] = aPrime;
       transformedB[j] = bPrime;
     }
+  }
+
+  // Append any extra ops produced by straddle-split handling
+  if (_straddleAfterOps.length > 0) {
+    transformedA.push(..._straddleAfterOps);
+    _straddleAfterOps = [];
   }
 
   return [transformedA, transformedB];

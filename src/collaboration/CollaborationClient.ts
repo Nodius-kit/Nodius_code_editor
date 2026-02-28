@@ -2,6 +2,7 @@ import type { Operation, Position, RemoteCursor } from '../core/types';
 import type { ClientMessage, ServerMessage, CollaborationClientOptions } from './types';
 import { transformOps } from './OTEngine';
 import { CursorSync } from './CursorSync';
+import { encodeOperations, decodeInstructions } from './InstructionCodec';
 
 /**
  * The three states of the Jupiter/Wave OT client state machine.
@@ -109,7 +110,7 @@ export class CollaborationClient {
           this.sendFn({
             type: 'operation',
             revision: this.revision,
-            ops: this.outstanding,
+            instructions: encodeOperations(this.outstanding),
           });
           this.state = 'awaitingConfirm';
         }
@@ -149,7 +150,7 @@ export class CollaborationClient {
         this.sendFn({
           type: 'operation',
           revision: this.revision,
-          ops: this.outstanding,
+          instructions: encodeOperations(this.outstanding),
         });
         this.state = 'awaitingConfirm';
       } else if (this.state === 'awaitingConfirm') {
@@ -178,7 +179,7 @@ export class CollaborationClient {
         this.handleAck(msg.revision);
         break;
       case 'operation':
-        this.handleRemoteOps(msg.revision, msg.ops);
+        this.handleRemoteOps(msg.revision, decodeInstructions(msg.instructions));
         break;
       case 'cursor':
         this.handleCursor(msg.userId, msg.position, msg.color);
@@ -206,7 +207,7 @@ export class CollaborationClient {
         this.sendFn({
           type: 'operation',
           revision: this.revision,
-          ops: this.outstanding!,
+          instructions: encodeOperations(this.outstanding!),
         });
         this.state = 'awaitingConfirm';
         break;

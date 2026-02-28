@@ -6,6 +6,7 @@ import type { Operation } from '../../src/core/types';
 import { transformOps } from '../../src/collaboration/OTEngine';
 import { applyOperations } from '../../src/core/operations/OperationEngine';
 import { createDocument, getText } from '../../src/core/document/Document';
+import { encodeOperations, decodeInstructions } from '../../src/collaboration/InstructionCodec';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,7 +133,7 @@ describe('CollaborationClient', () => {
     expect(sent[0]).toEqual({
       type: 'operation',
       revision: 0,
-      ops,
+      instructions: encodeOperations(ops),
     });
 
     client.destroy();
@@ -235,7 +236,7 @@ describe('CollaborationClient', () => {
     expect(sent[1]).toEqual({
       type: 'operation',
       revision: 1,
-      ops: [{ type: 'insertText', line: 0, column: 1, text: 'B', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 1, text: 'B', origin: 'input' }]),
     });
 
     // ACK the second op
@@ -264,10 +265,11 @@ describe('CollaborationClient', () => {
       type: 'operation',
       revision: 1,
       userId: 'user2',
-      ops: remoteOps,
+      instructions: encodeOperations(remoteOps),
     });
 
     expect(remoteHandler).toHaveBeenCalledTimes(1);
+    // After decode, ops have origin='remote'
     expect(remoteHandler).toHaveBeenCalledWith(remoteOps);
     expect(client.getRevision()).toBe(1);
 
@@ -294,7 +296,7 @@ describe('CollaborationClient', () => {
       type: 'operation',
       revision: 1,
       userId: 'user2',
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'remote' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'remote' }]),
     });
 
     expect(remoteHandler).toHaveBeenCalledTimes(1);
@@ -332,7 +334,7 @@ describe('CollaborationClient', () => {
       type: 'operation',
       revision: 1,
       userId: 'user2',
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'C', origin: 'remote' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'C', origin: 'remote' }]),
     });
 
     expect(remoteHandler).toHaveBeenCalledTimes(1);
@@ -460,7 +462,7 @@ describe('CollaborationServer', () => {
     server.receiveFromClient('user1', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }]),
     });
   });
 
@@ -472,7 +474,7 @@ describe('CollaborationServer', () => {
     server.receiveFromClient('user1', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }]),
     });
 
     expect(server.getRevision()).toBe(1);
@@ -498,7 +500,7 @@ describe('CollaborationServer', () => {
     server.receiveFromClient('alice', {
       type: 'operation',
       revision: 0,
-      ops,
+      instructions: encodeOperations(ops),
     });
 
     // Alice gets ACK
@@ -507,12 +509,12 @@ describe('CollaborationServer', () => {
       revision: 1,
     });
 
-    // Bob gets the operation
+    // Bob gets the operation (encoded as instructions)
     expect(sendBob).toHaveBeenCalledWith({
       type: 'operation',
       revision: 1,
       userId: 'alice',
-      ops,
+      instructions: encodeOperations(ops),
     });
   });
 
@@ -528,7 +530,7 @@ describe('CollaborationServer', () => {
     server.receiveFromClient('alice', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }]),
     });
     // Server is now at revision 1
 
@@ -536,7 +538,7 @@ describe('CollaborationServer', () => {
     server.receiveFromClient('bob', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'input' }]),
     });
     // Server should transform Bob's op against Alice's op
 
@@ -548,14 +550,18 @@ describe('CollaborationServer', () => {
       revision: 2,
     });
 
-    // Alice gets Bob's transformed op
+    // Alice gets Bob's transformed op (as instructions)
     const aliceCalls = sendAlice.mock.calls;
     const bobOpBroadcast = aliceCalls.find(
       (call) => call[0].type === 'operation' && call[0].userId === 'bob',
     );
     expect(bobOpBroadcast).toBeDefined();
     // Bob's 'B' at col 0 should be shifted to col 1 because Alice's 'A' was at col 0 first
-    expect(bobOpBroadcast![0].ops[0].column).toBe(1);
+    const decodedOps = decodeInstructions(bobOpBroadcast![0].instructions);
+    expect(decodedOps[0].type).toBe('insertText');
+    if (decodedOps[0].type === 'insertText') {
+      expect(decodedOps[0].column).toBe(1);
+    }
   });
 
   it('broadcasts cursor updates to other clients', () => {
@@ -800,7 +806,7 @@ describe('3-state machine transitions', () => {
       type: 'operation',
       revision: 1,
       userId: 'user2',
-      ops: [{ type: 'insertText', line: 0, column: 5, text: 'B', origin: 'remote' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 5, text: 'B', origin: 'remote' }]),
     });
 
     // Still awaitingConfirm (remote ops don't change state)
@@ -828,7 +834,7 @@ describe('3-state machine transitions', () => {
       type: 'operation',
       revision: 1,
       userId: 'user2',
-      ops: [{ type: 'insertText', line: 0, column: 5, text: 'C', origin: 'remote' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 5, text: 'C', origin: 'remote' }]),
     });
 
     expect(client.getState()).toBe('awaitingWithBuffer');
@@ -850,7 +856,7 @@ describe('Server serialization ordering', () => {
     server.receiveFromClient('alice', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'A', origin: 'input' }]),
     });
     expect(server.getRevision()).toBe(1);
 
@@ -858,7 +864,7 @@ describe('Server serialization ordering', () => {
     server.receiveFromClient('bob', {
       type: 'operation',
       revision: 0,
-      ops: [{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'input' }],
+      instructions: encodeOperations([{ type: 'insertText', line: 0, column: 0, text: 'B', origin: 'input' }]),
     });
     expect(server.getRevision()).toBe(2);
 
@@ -1117,8 +1123,8 @@ describe('Debounce behavior', () => {
     // Now sent as a single batch
     expect(sent).toHaveLength(1);
     expect(client.getState()).toBe('awaitingConfirm');
-    const msg = sent[0] as { type: 'operation'; ops: Operation[] };
-    expect(msg.ops).toHaveLength(2);
+    const msg = sent[0] as { type: 'operation'; instructions: unknown[] };
+    expect(msg.instructions).toHaveLength(2);
 
     client.destroy();
   });

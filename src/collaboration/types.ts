@@ -1,3 +1,4 @@
+import type { Instruction } from '@nodius/utils';
 import type { Operation, Position, Delta } from '../core/types';
 
 // ========== Legacy types (kept for backward compatibility) ==========
@@ -23,12 +24,15 @@ export interface CollaborationOptions {
 
 /**
  * Messages sent from a client to the server.
+ *
+ * Operations are encoded as @nodius/utils Instructions for compact wire format.
  */
 export type ClientMessage = {
   type: 'operation';
   /** The last server revision the client had seen when it generated these ops. */
   revision: number;
-  ops: Operation[];
+  /** Operations encoded as @nodius/utils Instructions. */
+  instructions: Instruction[];
 } | {
   type: 'cursor';
   position: Position;
@@ -37,6 +41,8 @@ export type ClientMessage = {
 
 /**
  * Messages sent from the server to clients.
+ *
+ * Operations are encoded as @nodius/utils Instructions for compact wire format.
  */
 export type ServerMessage = {
   type: 'ack';
@@ -47,7 +53,8 @@ export type ServerMessage = {
   /** The new server revision after applying this operation. */
   revision: number;
   userId: string;
-  ops: Operation[];
+  /** Operations encoded as @nodius/utils Instructions. */
+  instructions: Instruction[];
 } | {
   type: 'cursor';
   userId: string;
